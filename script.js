@@ -28,29 +28,29 @@ const canvas = document.getElementsByTagName('canvas')[0];
 resizeCanvas();
 
 let config = {
-    SIM_RESOLUTION: 128,
-    DYE_RESOLUTION: 1024,
-    CAPTURE_RESOLUTION: 512,
-    DENSITY_DISSIPATION: 1,
-    VELOCITY_DISSIPATION: 0.2,
-    PRESSURE: 0.8,
+    SIM_RESOLUTION: 64,
+    DYE_RESOLUTION: 512,    
+    DENSITY_DISSIPATION: 0.05,
+    VELOCITY_DISSIPATION: 5.0,
+    VISCOSITY: 0.25,
+    PRESSURE: 0.25,
     PRESSURE_ITERATIONS: 20,
-    CURL: 30,
+    CURL: 0, // vorticity in ui
     SPLAT_RADIUS: 0.25,
     SPLAT_FORCE: 6000,
-    SHADING: true,
-    COLORFUL: true,
+    SHADING: false,
+    COLORFUL: false,
     COLOR_UPDATE_SPEED: 10,
     PAUSED: false,
     BACK_COLOR: { r: 0, g: 0, b: 0 },
     TRANSPARENT: false,
-    BLOOM: true,
+    BLOOM: false,
     BLOOM_ITERATIONS: 8,
     BLOOM_RESOLUTION: 256,
     BLOOM_INTENSITY: 0.8,
     BLOOM_THRESHOLD: 0.6,
     BLOOM_SOFT_KNEE: 0.7,
-    SUNRAYS: true,
+    SUNRAYS: false,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
 }
@@ -181,7 +181,8 @@ function startGUI () {
     gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
     gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
     gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
-    gui.add(config, 'VELOCITY_DISSIPATION', 0, 4.0).name('velocity diffusion');
+    gui.add(config, 'VELOCITY_DISSIPATION', 0.05, 20.0).name('velocity diffusion');
+    gui.add(config, 'VISCOSITY', 0.05, 20.0).name('viscosity');
     gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
     gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
     gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
@@ -202,51 +203,6 @@ function startGUI () {
     sunraysFolder.add(config, 'SUNRAYS').name('enabled').onFinishChange(updateKeywords);
     sunraysFolder.add(config, 'SUNRAYS_WEIGHT', 0.3, 1.0).name('weight');
 
-    let captureFolder = gui.addFolder('Capture');
-    captureFolder.addColor(config, 'BACK_COLOR').name('background color');
-    captureFolder.add(config, 'TRANSPARENT').name('transparent');
-    captureFolder.add({ fun: captureScreenshot }, 'fun').name('take screenshot');
-
-    let github = gui.add({ fun : () => {
-        window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
-        ga('send', 'event', 'link button', 'github');
-    } }, 'fun').name('Github');
-    github.__li.className = 'cr function bigFont';
-    github.__li.style.borderLeft = '3px solid #8C8C8C';
-    let githubIcon = document.createElement('span');
-    github.domElement.parentElement.appendChild(githubIcon);
-    githubIcon.className = 'icon github';
-
-    let twitter = gui.add({ fun : () => {
-        ga('send', 'event', 'link button', 'twitter');
-        window.open('https://twitter.com/PavelDoGreat');
-    } }, 'fun').name('Twitter');
-    twitter.__li.className = 'cr function bigFont';
-    twitter.__li.style.borderLeft = '3px solid #8C8C8C';
-    let twitterIcon = document.createElement('span');
-    twitter.domElement.parentElement.appendChild(twitterIcon);
-    twitterIcon.className = 'icon twitter';
-
-    let discord = gui.add({ fun : () => {
-        ga('send', 'event', 'link button', 'discord');
-        window.open('https://discordapp.com/invite/CeqZDDE');
-    } }, 'fun').name('Discord');
-    discord.__li.className = 'cr function bigFont';
-    discord.__li.style.borderLeft = '3px solid #8C8C8C';
-    let discordIcon = document.createElement('span');
-    discord.domElement.parentElement.appendChild(discordIcon);
-    discordIcon.className = 'icon discord';
-
-    let app = gui.add({ fun : () => {
-        ga('send', 'event', 'link button', 'app');
-        window.open('http://onelink.to/5b58bn');
-    } }, 'fun').name('Check out mobile app');
-    app.__li.className = 'cr function appBigFont';
-    app.__li.style.borderLeft = '3px solid #00FF7F';
-    let appIcon = document.createElement('span');
-    app.domElement.parentElement.appendChild(appIcon);
-    appIcon.className = 'icon app';
-
     if (isMobile())
         gui.close();
 }
@@ -255,19 +211,6 @@ function isMobile () {
     return /Mobi|Android/i.test(navigator.userAgent);
 }
 
-function captureScreenshot () {
-    let res = getResolution(config.CAPTURE_RESOLUTION);
-    let target = createFBO(res.width, res.height, ext.formatRGBA.internalFormat, ext.formatRGBA.format, ext.halfFloatTexType, gl.NEAREST);
-    render(target);
-
-    let texture = framebufferToTexture(target);
-    texture = normalizeTexture(texture, target.width, target.height);
-
-    let captureCanvas = textureToCanvas(texture, target.width, target.height);
-    let datauri = captureCanvas.toDataURL();
-    downloadURI('fluid.png', datauri);
-    URL.revokeObjectURL(datauri);
-}
 
 function framebufferToTexture (target) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
@@ -482,7 +425,7 @@ const clearShader = compileShader(gl.FRAGMENT_SHADER, `
 
     varying highp vec2 vUv;
     uniform sampler2D uTexture;
-    uniform float value;
+    uniform float value; // PRESSURE
 
     void main () {
         gl_FragColor = value * texture2D(uTexture, vUv);
@@ -741,18 +684,58 @@ const advectionShader = compileShader(gl.FRAGMENT_SHADER, `
     }
 
     void main () {
+
     #ifdef MANUAL_FILTERING
         vec2 coord = vUv - dt * bilerp(uVelocity, vUv, texelSize).xy * texelSize;
         vec4 result = bilerp(uSource, coord, dyeTexelSize);
-    #else
+    #else // default
         vec2 coord = vUv - dt * texture2D(uVelocity, vUv).xy * texelSize;
         vec4 result = texture2D(uSource, coord);
     #endif
+
         float decay = 1.0 + dissipation * dt;
-        gl_FragColor = result / decay;
+        // p let's try to turn of the decay hack for viscosity, and just handling the viscosity with the diffuse velocity shader!
+        gl_FragColor = result;// / decay; // p the decay controls viscosity in the case of velocity advection (note that we control viscosity via kinematic viscosity, but try this too)
     }`,
     ext.supportLinearFiltering ? null : ['MANUAL_FILTERING']
 );
+
+const velocityDiffusionShader = compileShader(gl.FRAGMENT_SHADER, `
+    precision highp float;
+    precision highp sampler2D;
+    
+    uniform sampler2D uVelocity;
+    uniform sampler2D uSource;
+
+    uniform vec2 texelSize;    
+    uniform float dt;
+    uniform float viscosity;
+
+    varying highp vec2 vUv;
+    varying highp vec2 vL;
+    varying highp vec2 vR;
+    varying highp vec2 vT;
+    varying highp vec2 vB;
+    
+
+    void main () {
+
+        vec2 L = texture2D(uVelocity, vL).xy;
+        vec2 R = texture2D(uVelocity, vR).xy;
+        vec2 T = texture2D(uVelocity, vT).xy;
+        vec2 B = texture2D(uVelocity, vB).xy;       
+
+        vec2 bC = texture2D(uVelocity, vUv).xy;
+
+        float alpha =  (1.0 * 1.0) / (viscosity * dt);
+        float rBeta =  1.0 / (4.0 + alpha);
+
+        vec2 uv = (L + R + B + T - alpha * bC) * rBeta;
+
+        gl_FragColor = vec4(uv, 0.0, 1.0);
+    }
+    
+`);
 
 const divergenceShader = compileShader(gl.FRAGMENT_SHADER, `
     precision mediump float;
@@ -918,7 +901,10 @@ const bloomFinalProgram      = new Program(baseVertexShader, bloomFinalShader);
 const sunraysMaskProgram     = new Program(baseVertexShader, sunraysMaskShader);
 const sunraysProgram         = new Program(baseVertexShader, sunraysShader);
 const splatProgram           = new Program(baseVertexShader, splatShader);
+
 const advectionProgram       = new Program(baseVertexShader, advectionShader);
+const velocityDiffusionProgram       = new Program(baseVertexShader, velocityDiffusionShader);
+
 const divergenceProgram      = new Program(baseVertexShader, divergenceShader);
 const curlProgram            = new Program(baseVertexShader, curlShader);
 const vorticityProgram       = new Program(baseVertexShader, vorticityShader);
@@ -1120,13 +1106,16 @@ let colorUpdateTimer = 0.0;
 update();
 
 function update () {
-    const dt = calcDeltaTime();
+
+    const dt = calcDeltaTime(); 
+
     if (resizeCanvas())
         initFramebuffers();
     updateColors(dt);
     applyInputs();
+
     if (!config.PAUSED)
-        step(dt);
+        step(dt); // p this was the problem with the weird behaviour of the splats not visible or no simulation active. with Math.min(dt, 0.016666) we can get ZER0! thus no sim(see below in calcDeltaTime (), and the changes made)
     render(null);
     requestAnimationFrame(update);
 }
@@ -1134,9 +1123,9 @@ function update () {
 function calcDeltaTime () {
     let now = Date.now();
     let dt = (now - lastUpdateTime) / 1000;
-    dt = Math.min(dt, 0.016666);
+    dt = Math.max(dt, 0.016666); // p this was the problem with the weird behaviour of the splats not visible or no simulation active. Reason: with Math.min(dt, 0.016666) we can get ZER0!, we changed it to Math.max(dt, 0.016666), and it works flawlessly.
     lastUpdateTime = now;
-    return dt;
+    return dt; 
 }
 
 function resizeCanvas () {
@@ -1175,9 +1164,15 @@ function applyInputs () {
 }
 
 function step (dt) {
+
+
+
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, velocity.width, velocity.height);
 
+
+    //---------------------------------------------------------------------------------
+    // p Vorticity
     curlProgram.bind();
     gl.uniform2f(curlProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
     gl.uniform1i(curlProgram.uniforms.uVelocity, velocity.read.attach(0));
@@ -1190,8 +1185,29 @@ function step (dt) {
     gl.uniform1f(vorticityProgram.uniforms.curl, config.CURL);
     gl.uniform1f(vorticityProgram.uniforms.dt, dt);
     blit(velocity.write.fbo);
-    velocity.swap();
+    velocity.swap();  
 
+
+    //////////////////////////////////////////////////////////////////////////////////////////////
+    // p (mine) velocity diffusion (aka VISCOSITY)
+    velocityDiffusionProgram.bind();
+    gl.uniform2f(velocityDiffusionProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+    if (!ext.supportLinearFiltering)
+        gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, velocity.texelSizeX, velocity.texelSizeY);
+    gl.uniform1f(velocityDiffusionProgram.uniforms.dt, dt);  
+    gl.uniform1f(velocityDiffusionProgram.uniforms.viscosity, config.VISCOSITY);
+    for (let i = 0; i < 10; i++) {
+        gl.uniform1i(velocityDiffusionProgram.uniforms.uVelocity, velocity.read.attach(0)); 
+        gl.uniform1i(velocityDiffusionProgram.uniforms.uSource, velocity.read.attach(0)); 
+        blit(velocity.write.fbo);
+        velocity.swap();         
+    } 
+
+
+
+
+    //---------------------------------------------------------------------------------
+    // p Projection    
     divergenceProgram.bind();
     gl.uniform2f(divergenceProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
     gl.uniform1i(divergenceProgram.uniforms.uVelocity, velocity.read.attach(0));
@@ -1219,20 +1235,30 @@ function step (dt) {
     blit(velocity.write.fbo);
     velocity.swap();
 
+     
+
+        
+    //---------------------------------------------------------------------------------
+    // p advect velocity
     advectionProgram.bind();
     gl.uniform2f(advectionProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
     if (!ext.supportLinearFiltering)
         gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, velocity.texelSizeX, velocity.texelSizeY);
+
     let velocityId = velocity.read.attach(0);
     gl.uniform1i(advectionProgram.uniforms.uVelocity, velocityId);
     gl.uniform1i(advectionProgram.uniforms.uSource, velocityId);
+
     gl.uniform1f(advectionProgram.uniforms.dt, dt);
-    gl.uniform1f(advectionProgram.uniforms.dissipation, config.VELOCITY_DISSIPATION);
+    gl.uniform1f(advectionProgram.uniforms.dissipation, config.VELOCITY_DISSIPATION); // p here is the velocity dissipation, but why in an advection routine?
     blit(velocity.write.fbo);
     velocity.swap();
 
+
     gl.viewport(0, 0, dye.width, dye.height);
 
+    //---------------------------------------------------------------------------------
+    // p advect dye
     if (!ext.supportLinearFiltering)
         gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, dye.texelSizeX, dye.texelSizeY);
     gl.uniform1i(advectionProgram.uniforms.uVelocity, velocity.read.attach(0));
@@ -1240,6 +1266,9 @@ function step (dt) {
     gl.uniform1f(advectionProgram.uniforms.dissipation, config.DENSITY_DISSIPATION);
     blit(dye.write.fbo);
     dye.swap();
+
+
+
 }
 
 function render (target) {
@@ -1262,12 +1291,17 @@ function render (target) {
     let height = target == null ? gl.drawingBufferHeight : target.height;
     gl.viewport(0, 0, width, height);
 
+
+
     let fbo = target == null ? null : target.fbo;
     if (!config.TRANSPARENT)
         drawColor(fbo, normalizeColor(config.BACK_COLOR));
     if (target == null && config.TRANSPARENT)
         drawCheckerboard(fbo);
     drawDisplay(fbo, width, height);
+
+
+  
 }
 
 function drawColor (fbo, color) {
