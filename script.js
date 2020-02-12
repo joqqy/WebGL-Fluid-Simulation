@@ -31,10 +31,9 @@ let config = {
     SIM_RESOLUTION: 64,
     DYE_RESOLUTION: 512,    
     DENSITY_DISSIPATION: 0.05,
-    VELOCITY_DISSIPATION: 5.0,
-    VISCOSITY: 0.25,
-    PRESSURE: 0.25,
-    PRESSURE_ITERATIONS: 20,
+    VELOCITY_DISSIPATION: 5.0, // pseudo viscosity in the advection shader (decay)
+    VISCOSITY: 0.25,    
+    PRESSURE: 0.25,       
     CURL: 0, // vorticity in ui
     SPLAT_RADIUS: 0.25,
     SPLAT_FORCE: 6000,
@@ -53,6 +52,8 @@ let config = {
     SUNRAYS: false,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
+    VISCOSITY_ITERATIONS: 10,
+    PRESSURE_ITERATIONS: 20, 
 }
 
 function pointerPrototype () {
@@ -182,8 +183,10 @@ function startGUI () {
     gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
     gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
     gui.add(config, 'VELOCITY_DISSIPATION', 0.05, 20.0).name('velocity diffusion');
-    gui.add(config, 'VISCOSITY', 0.05, 20.0).name('viscosity');
+    gui.add(config, 'VISCOSITY', 0.01, 20.0).name('viscosity');
+    gui.add(config, 'VISCOSITY_ITERATIONS', 1.0, 20.0).name('viscosity_iterations');
     gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
+    gui.add(config, 'PRESSURE_ITERATIONS', 1.0, 20.0).name('pressure_iterations');
     gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
     gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
     gui.add(config, 'SHADING').name('shading').onFinishChange(updateKeywords);
@@ -725,9 +728,9 @@ const velocityDiffusionShader = compileShader(gl.FRAGMENT_SHADER, `
         vec2 T = texture2D(uVelocity, vT).xy;
         vec2 B = texture2D(uVelocity, vB).xy;       
 
-        vec2 bC = texture2D(uVelocity, vUv).xy;
+        vec2 bC = texture2D(uSource, vUv).xy;
 
-        float alpha =  (1.0 * 1.0) / (viscosity * dt);
+        float alpha = (1.0 * 1.0) / (viscosity * dt);
         float rBeta =  1.0 / (4.0 + alpha);
 
         vec2 uv = (L + R + B + T - alpha * bC) * rBeta;
@@ -1099,7 +1102,7 @@ function updateKeywords () {
 
 updateKeywords();
 initFramebuffers();
-multipleSplats(parseInt(Math.random() * 20) + 5);
+// multipleSplats(parseInt(Math.random() * 20) + 5); // p off (we do not want random multiple splats at start)
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
@@ -1196,7 +1199,7 @@ function step (dt) {
         gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, velocity.texelSizeX, velocity.texelSizeY);
     gl.uniform1f(velocityDiffusionProgram.uniforms.dt, dt);  
     gl.uniform1f(velocityDiffusionProgram.uniforms.viscosity, config.VISCOSITY);
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < config.VISCOSITY_ITERATIONS; i++) {
         gl.uniform1i(velocityDiffusionProgram.uniforms.uVelocity, velocity.read.attach(0)); 
         gl.uniform1i(velocityDiffusionProgram.uniforms.uSource, velocity.read.attach(0)); 
         blit(velocity.write.fbo);
@@ -1213,6 +1216,7 @@ function step (dt) {
     gl.uniform1i(divergenceProgram.uniforms.uVelocity, velocity.read.attach(0));
     blit(divergence.fbo);
 
+    // p Sets the initial guess value for the pressure
     clearProgram.bind();
     gl.uniform1i(clearProgram.uniforms.uTexture, pressure.read.attach(0));
     gl.uniform1f(clearProgram.uniforms.value, config.PRESSURE);
